@@ -10,7 +10,7 @@ let scene, camera, renderer, controls, composer;
 let sky, stars, cloudSystems = [], flash;
 const sun = new THREE.Vector3();
 
-// Enhanced effect controller with cloud parameters
+// Enhanced effect controller with adjusted cloud parameters
 const effectController = {
   turbidity: 6,
   rayleigh: 2,
@@ -19,16 +19,16 @@ const effectController = {
   elevation: 2,
   azimuth: 180,
   exposure: 0.5,
-  cloudDensity: 0.8,
+  cloudDensity: 1.2, 
   windSpeed: 0.2,
   temperature: 20,
 };
 
-// Cloud shader
+// Modified cloud shader with enhanced whiteness
 const cloudShader = {
   uniforms: {
     time: { value: 0 },
-    density: { value: 0.8 },
+    density: { value: 1.2 }, 
     altitude: { value: 0.0 },
     lightPos: { value: new THREE.Vector3() },
     temperature: { value: 20.0 }
@@ -84,10 +84,10 @@ const cloudShader = {
       // Altitude-based density
       float altitudeFactor = smoothstep(0.0, 1.0, 1.0 - abs(altitude - vPosition.y) / 100.0);
       
-      // Temperature affects color
+      // Whiter cloud color palette
       vec3 cloudColor = mix(
-        vec3(0.7, 0.7, 0.8), // Cool
-        vec3(1.0, 0.95, 0.8), // Warm
+        vec3(0.95, 0.95, 0.97), 
+        vec3(1.0, 1.0, 1.0),    
         smoothstep(0.0, 30.0, temperature)
       );
 
@@ -95,9 +95,11 @@ const cloudShader = {
       vec3 lightDir = normalize(lightPos - vPosition);
       float scatter = max(0.0, dot(lightDir, vec3(0.0, 1.0, 0.0)));
       
-      // Final color
-      float alpha = n * density * altitudeFactor;
-      gl_FragColor = vec4(cloudColor * (0.6 + 0.4 * scatter), alpha);
+      // Enhanced alpha for thicker clouds
+      float alpha = n * density * altitudeFactor * 1.5;
+      // Enhance brightness
+      vec3 finalColor = cloudColor * (0.8 + 0.4 * scatter);
+      gl_FragColor = vec4(finalColor, alpha);
     }
   `
 };
@@ -202,38 +204,40 @@ function createCumulusClouds() {
     depthWrite: false,
   });
 
-  for(let i = 0; i < 20; i++) {
+  // Increased number of cumulus clouds
+  for(let i = 0; i < 40; i++) { 
     const cloud = new THREE.Mesh(cloudGeometry, material.clone());
     cloud.position.set(
-      Math.random() * 1000 - 500,
-      Math.random() * 100 + 300,
-      Math.random() * 1000 - 500
+      Math.random() * 1200 - 600,
+      Math.random() * 150 + 250,
+      Math.random() * 1200 - 600
     );
-    cloud.scale.setScalar(1 + Math.random() * 2);
+    cloud.scale.setScalar(1.5 + Math.random() * 2.5); 
     cloud.material.uniforms.altitude.value = cloud.position.y;
+    cloud.material.uniforms.density.value = 1.2 + Math.random() * 0.3; 
     cloudSystems.push({ mesh: cloud, type: 'cumulus' });
     scene.add(cloud);
   }
 }
 
 function createCirrusClouds() {
-  const cloudGeometry = new THREE.PlaneBufferGeometry(200, 20);
+  const cloudGeometry = new THREE.PlaneBufferGeometry(300, 30); 
   const material = new ShaderMaterial({
     ...cloudShader,
     transparent: true,
     depthWrite: false,
   });
 
-  for(let i = 0; i < 30; i++) {
+  for(let i = 0; i < 45; i++) { 
     const cloud = new THREE.Mesh(cloudGeometry, material.clone());
     cloud.position.set(
-      Math.random() * 1000 - 500,
+      Math.random() * 1200 - 600,
       Math.random() * 100 + 500,
-      Math.random() * 1000 - 500
+      Math.random() * 1200 - 600
     );
     cloud.rotation.x = Math.PI / 2;
     cloud.rotation.z = Math.random() * Math.PI;
-    cloud.material.uniforms.density.value = 0.3;
+    cloud.material.uniforms.density.value = 0.5; 
     cloud.material.uniforms.altitude.value = cloud.position.y;
     cloudSystems.push({ mesh: cloud, type: 'cirrus' });
     scene.add(cloud);
@@ -241,22 +245,22 @@ function createCirrusClouds() {
 }
 
 function createStratusClouds() {
-  const cloudGeometry = new THREE.PlaneBufferGeometry(400, 400);
+  const cloudGeometry = new THREE.PlaneBufferGeometry(600, 600); 
   const material = new ShaderMaterial({
     ...cloudShader,
     transparent: true,
     depthWrite: false,
   });
 
-  for(let i = 0; i < 10; i++) {
+  for(let i = 0; i < 15; i++) { 
     const cloud = new THREE.Mesh(cloudGeometry, material.clone());
     cloud.position.set(
-      Math.random() * 1000 - 500,
+      Math.random() * 1200 - 600,
       Math.random() * 50 + 200,
-      Math.random() * 1000 - 500
+      Math.random() * 1200 - 600
     );
     cloud.rotation.x = Math.PI / 2;
-    cloud.material.uniforms.density.value = 0.5;
+    cloud.material.uniforms.density.value = 0.8; 
     cloud.material.uniforms.altitude.value = cloud.position.y;
     cloudSystems.push({ mesh: cloud, type: 'stratus' });
     scene.add(cloud);
