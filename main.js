@@ -4,11 +4,13 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { ShaderMaterial } from 'three';
 
 let scene, camera, renderer, controls, composer;
-let sky, stars, cloudParticles = [], flash;
+let sky, stars, cloudSystems = [], flash;
 const sun = new THREE.Vector3();
 
+// Enhanced effect controller with cloud parameters
 const effectController = {
   turbidity: 6,
   rayleigh: 2,
@@ -17,6 +19,87 @@ const effectController = {
   elevation: 2,
   azimuth: 180,
   exposure: 0.5,
+  cloudDensity: 0.8,
+  windSpeed: 0.2,
+  temperature: 20,
+};
+
+// Cloud shader
+const cloudShader = {
+  uniforms: {
+    time: { value: 0 },
+    density: { value: 0.8 },
+    altitude: { value: 0.0 },
+    lightPos: { value: new THREE.Vector3() },
+    temperature: { value: 20.0 }
+  },
+  vertexShader: `
+    varying vec3 vPosition;
+    varying vec2 vUv;
+    void main() {
+      vPosition = position;
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform float time;
+    uniform float density;
+    uniform float altitude;
+    uniform float temperature;
+    uniform vec3 lightPos;
+    varying vec3 vPosition;
+    varying vec2 vUv;
+
+    // Noise functions
+    float rand(vec2 n) { 
+      return fract(sin(dot(n, vec2(12.9898, 4.1414))) * 43758.5453);
+    }
+
+    float noise(vec2 p) {
+      vec2 ip = floor(p);
+      vec2 u = fract(p);
+      u = u*u*(3.0-2.0*u);
+      float res = mix(
+        mix(rand(ip), rand(ip+vec2(1.0,0.0)), u.x),
+        mix(rand(ip+vec2(0.0,1.0)), rand(ip+vec2(1.0,1.0)), u.x), u.y);
+      return res*res;
+    }
+
+    float fbm(vec2 p) {
+      float f = 0.0;
+      float w = 0.5;
+      for (int i = 0; i < 5; i++) {
+        f += w * noise(p);
+        p *= 2.0;
+        w *= 0.5;
+      }
+      return f;
+    }
+
+    void main() {
+      // Worley noise-based density
+      float n = fbm(vUv * 4.0 + time * 0.1);
+      
+      // Altitude-based density
+      float altitudeFactor = smoothstep(0.0, 1.0, 1.0 - abs(altitude - vPosition.y) / 100.0);
+      
+      // Temperature affects color
+      vec3 cloudColor = mix(
+        vec3(0.7, 0.7, 0.8), // Cool
+        vec3(1.0, 0.95, 0.8), // Warm
+        smoothstep(0.0, 30.0, temperature)
+      );
+
+      // Light scattering
+      vec3 lightDir = normalize(lightPos - vPosition);
+      float scatter = max(0.0, dot(lightDir, vec3(0.0, 1.0, 0.0)));
+      
+      // Final color
+      float alpha = n * density * altitudeFactor;
+      gl_FragColor = vec4(cloudColor * (0.6 + 0.4 * scatter), alpha);
+    }
+  `
 };
 
 init();
@@ -75,7 +158,9 @@ function init() {
   createStars();
   
   // Volumetric Clouds
-  createVolumetricClouds();
+  createCumulusClouds();
+  createCirrusClouds();
+  createStratusClouds();
 
   // Lightning
   createLightning();
@@ -109,30 +194,71 @@ function createStars() {
   scene.add(stars);
 }
 
-function createVolumetricClouds() {
-  const loader = new THREE.TextureLoader();
-  const cloudTexture = new THREE.TextureLoader().load(
-    'data:image/png;base64,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'
-  );
-
-  const cloudGeometry = new THREE.PlaneBufferGeometry(500, 500);
-  const cloudMaterial = new THREE.MeshLambertMaterial({
-    map: cloudTexture,
-    transparent: true
+function createCumulusClouds() {
+  const cloudGeometry = new THREE.SphereBufferGeometry(50, 32, 32);
+  const material = new ShaderMaterial({
+    ...cloudShader,
+    transparent: true,
+    depthWrite: false,
   });
 
-  for(let p = 0; p < 50; p++) {
-    let cloud = new THREE.Mesh(cloudGeometry, cloudMaterial);
+  for(let i = 0; i < 20; i++) {
+    const cloud = new THREE.Mesh(cloudGeometry, material.clone());
     cloud.position.set(
       Math.random() * 1000 - 500,
-      Math.random() * 200 + 200,
+      Math.random() * 100 + 300,
       Math.random() * 1000 - 500
     );
-    cloud.rotation.x = 1.16;
-    cloud.rotation.y = -0.12;
-    cloud.rotation.z = Math.random() * 2 * Math.PI;
-    cloud.material.opacity = 0.55;
-    cloudParticles.push(cloud);
+    cloud.scale.setScalar(1 + Math.random() * 2);
+    cloud.material.uniforms.altitude.value = cloud.position.y;
+    cloudSystems.push({ mesh: cloud, type: 'cumulus' });
+    scene.add(cloud);
+  }
+}
+
+function createCirrusClouds() {
+  const cloudGeometry = new THREE.PlaneBufferGeometry(200, 20);
+  const material = new ShaderMaterial({
+    ...cloudShader,
+    transparent: true,
+    depthWrite: false,
+  });
+
+  for(let i = 0; i < 30; i++) {
+    const cloud = new THREE.Mesh(cloudGeometry, material.clone());
+    cloud.position.set(
+      Math.random() * 1000 - 500,
+      Math.random() * 100 + 500,
+      Math.random() * 1000 - 500
+    );
+    cloud.rotation.x = Math.PI / 2;
+    cloud.rotation.z = Math.random() * Math.PI;
+    cloud.material.uniforms.density.value = 0.3;
+    cloud.material.uniforms.altitude.value = cloud.position.y;
+    cloudSystems.push({ mesh: cloud, type: 'cirrus' });
+    scene.add(cloud);
+  }
+}
+
+function createStratusClouds() {
+  const cloudGeometry = new THREE.PlaneBufferGeometry(400, 400);
+  const material = new ShaderMaterial({
+    ...cloudShader,
+    transparent: true,
+    depthWrite: false,
+  });
+
+  for(let i = 0; i < 10; i++) {
+    const cloud = new THREE.Mesh(cloudGeometry, material.clone());
+    cloud.position.set(
+      Math.random() * 1000 - 500,
+      Math.random() * 50 + 200,
+      Math.random() * 1000 - 500
+    );
+    cloud.rotation.x = Math.PI / 2;
+    cloud.material.uniforms.density.value = 0.5;
+    cloud.material.uniforms.altitude.value = cloud.position.y;
+    cloudSystems.push({ mesh: cloud, type: 'stratus' });
     scene.add(cloud);
   }
 }
@@ -161,6 +287,30 @@ function updateSun() {
   }
 }
 
+function updateClouds(time) {
+  cloudSystems.forEach(cloudSystem => {
+    const { mesh, type } = cloudSystem;
+    mesh.material.uniforms.time.value = time;
+    mesh.material.uniforms.temperature.value = effectController.temperature;
+    mesh.material.uniforms.lightPos.value.copy(sun);
+
+    // Type-specific updates
+    switch(type) {
+      case 'cumulus':
+        mesh.position.y += Math.sin(time * 0.001 + mesh.position.x) * 0.1;
+        break;
+      case 'cirrus':
+        mesh.position.x += effectController.windSpeed;
+        if(mesh.position.x > 500) mesh.position.x = -500;
+        break;
+      case 'stratus':
+        mesh.material.uniforms.density.value = 
+          0.5 + 0.2 * Math.sin(time * 0.0005 + mesh.position.z);
+        break;
+    }
+  });
+}
+
 function animate(time) {
   requestAnimationFrame(animate);
 
@@ -168,11 +318,6 @@ function animate(time) {
   const t = time * 0.0001;
   effectController.elevation = Math.sin(t) * 15 + 50;
   effectController.azimuth = (t * 10) % 360;
-
-  // Animate clouds
-  cloudParticles.forEach(p => {
-    p.rotation.z -= 0.001;
-  });
 
   // Animate lightning
   if(Math.random() > 0.93 || flash.power > 100) {
@@ -187,6 +332,7 @@ function animate(time) {
   }
 
   updateSun();
+  updateClouds(time);
   controls.update();
   composer.render();
 }
